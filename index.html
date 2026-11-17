@@ -1,31 +1,32 @@
-<!DOCTYPE html>
-<html lang="tr">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0d1014">
-<link rel="manifest" href="manifest.json">
-<link rel="apple-touch-icon" href="apple-touch-icon.png">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Yol Defteri">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>Yol Defteri</title>
-<style>
-  :root {
-    --bg: #0d1014;
-    --panel: #161b22;
-    --line: #262d38;
-    --text: #eef1f5;
-    --dim: #8b95a5;
-    --accent: #ffb020;
-    --bad: #ff6b5e;
-  }
-  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  html, body { margin: 0; background: var(--bg); color: var(--text);
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  body { padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); max-width: 520px; margin: 0 auto; }
-  .num { font-variant-numeric: tabular-nums; }
+  <div class="body">
+    <label for="limitInput">Hız limiti (km/sa), boşsa kapalı</label>
+    <input id="limitInput" type="number" inputmode="numeric" min="0" max="300" step="1" placeholder="örn. 110">
+    <label style="display:flex;gap:10px;align-items:center;color:var(--text);font-size:15px;margin-top:14px"><input id="alertOn" type="checkbox" style="width:22px;height:22px;padding:0"> Aşınca sesli ve titreşimli uyar</label>
+    <p class="note">Limit aşılınca hız rakamı kırmızı olur. Ses için telefonun sessiz modda olmaması gerekir. Titreşim yalnızca Android'de çalışır. Limiti ana ekrandaki "Hız limiti" düğmesine dokunarak da değiştirebilirsin.</p>
+  </div>
+</details>
 
-  .speed { text-align: center; padding: 18px 0 6px; }
-  .speed .v { font-size: clamp(120px, 38vw, 190px); font-weight: 700; line-height: 1; letter-spacing: -0.04em; }
+<details>
+  <summary>Yedekle ve uygulamayı kur</summary>
+  <div class="body">
+    <div class="backup">
+      <button id="exportBtn">Yedeği indir</button>
+      <button id="importBtn">Yedeği yükle</button>
+    </div>
+    <input id="importFile" type="file" accept="application/json,.json">
+    <button id="installBtn" style="margin-top:8px;font-size:15px;padding:14px;background:var(--bg);display:none">Ana ekrana ekle</button>
+    <p class="note" id="installNote">Yedek dosyası tüm yakıt alımlarını, yolculukları, rotaları ve km sayacını içerir. Tarayıcı verisini silmeden veya telefon değiştirmeden önce indir.</p>
+  </div>
+</details>
+
+<dialog id="emg">
+  <h2>Acil durum</h2>
+  <label for="emgNum">Gönderilecek numara</label>
+  <input id="emgNum" type="tel" inputmode="tel" placeholder="05xx xxx xx xx">
+  <label for="emgMsg">Mesaj (istersen düzenle)</label>
+  <textarea id="emgMsg" rows="10"></textarea>
+  <div class="row">
+    <button id="emgWA" class="danger-fill" disabled>WhatsApp ile gönder</button>
+    <button id="emgSMS" disabled>SMS ile gönder</button>
+  </div>
+  <div class="row">
