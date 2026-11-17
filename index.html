@@ -80,7 +80,8 @@
   li .t { font-size: 16px; font-weight: 600; }
   li small { color: var(--dim); display: block; margin-top: 3px; line-height: 1.4; }
   .acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-  .acts button { width: auto; padding: 7px 12px; font-size: 13px; background: var(--bg); color: var(--dim); border-radius: 10px; }
+  .acts button { width: auto; padding: 8px 12px; font-size: 13px; background: var(--bg); color: var(--dim); border-radius: 10px; }
+  .acts button.share { color: var(--accent); font-weight: 600; }
   .empty { color: var(--dim); font-size: 14px; padding: 4px 0; }
 
   .backup { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -115,6 +116,7 @@
 
 <button class="primary" id="tripBtn">Yolculuğu başlat</button>
 <button class="full" id="pauseBtn" style="display:none">Duraklat</button>
+<button class="full" id="gpxNowBtn" style="display:none">Mevcut rotayı GPX paylaş</button>
 <div class="row">
   <button id="shareBtn">Konumumu gönder</button>
   <button id="fuelBtn">Yakıt aldım</button>
@@ -145,7 +147,10 @@
 
 <details>
   <summary>Yolculuklar</summary>
-  <div class="body"><ul id="tripList"></ul></div>
+  <div class="body">
+    <ul id="tripList"></ul>
+    <p class="note">GPX dosyasını harita uygulamalarında (Google Earth, OsmAnd, Strava vb.) açabilir veya arkadaşlarına gönderebilirsin. Canlı yolculuk sırasında da ana ekrandaki “Mevcut rotayı GPX paylaş” düğmesini kullanabilirsin.</p>
+  </div>
 </details>
 
 <details>
@@ -431,4 +436,422 @@ function tripToJson(t) {
   function addPt(pt, force) {
     var a = state.trip.pts, lp = a[a.length - 1];
     if (force || !lp || haversine({ lat: lp[0], lon: lp[1] }, pt) >= 25) {
-      a.push([+pt.lat.toFixed(5), +pt.lon.t
+      a.push([+pt.lat.toFixed(5), +pt.lon.toFixed(5), Math.round(pt.t / 1000)]);
+      if (a.length > 20000) state.trip.pts = simplify(a, 15);
+    }
+  }
+
+  function onPos(p) {
+    var c = p.coords, now = p.timestamp || Date.now();
+    var pt = { lat: c.latitude, lon: c.longitude, t: now, acc: c.accuracy };
+    var good = c.accuracy <= 50;
+    var v = null; // m/s
+    if (typeof c.speed === "number" && !isNaN(c.speed) && c.speed >= 0) v = c.speed;
+    if (good) state.last = { lat: pt.lat, lon: pt.lon, acc: pt.acc, t: now };
+
+    if (last) {
+      var dt = (now - last.t) / 1000;
+      var d = haversine(last, pt);
+      if (v === null && dt > 0) v = d / dt;
+      var plausible = dt > 0 && d / dt < 70;           // 250 km/sa üstü sıçramaları ele
+      var moved = d > Math.max(4, c.accuracy * 0.25) && (v === null || v > 0.8);
+      if (state.trip && !state.trip.paused && good && plausible && moved) {
+        state.odo += d / 1000;
+        addPt(pt);
+      }
+      if (good) last = pt;
+    } else if (good) {
+      last = pt;
+      if (state.trip && !state.trip.pts.length) addPt(pt, true);
+    }
+
+    cur.speed = (v || 0) * 3.6;
+    if (cur.speed < 2) cur.speed = 0;
+    if (state.trip && !state.trip.paused && cur.speed > (state.trip.max || 0)) state.trip.max = cur.speed;
+    alertIfOver();
+    setStatus(good ? "GPS iyi (±" + Math.round(c.accuracy) + " m)" : "GPS zayıf (±" + Math.round(c.accuracy) + " m)", !good);
+    save();
+    render();
+  }
+  function onErr(e) {
+    var m = { 1: "Konum izni verilmedi. Tarayıcı ayarlarından izin ver.", 2: "Konum alınamıyor.", 3: "Konum zaman aşımı." };
+    setStatus(m[e.code] || "Konum hatası", true);
+  }
+
+  function startWatch() {
+    if (!("geolocation" in navigator)) { setStatus("Bu cihaz konumu desteklemiyor", true); return; }
+    if (watchId !== null) return;
+    last = null;
+    watchId = navigator.geolocation.watchPosition(onPos, onErr, { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 });
+    keepAwake();
+    tick = setInterval(render, 1000);
+  }
+  function stopWatch() {
+    if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+    watchId = null; last = null; cur.speed = 0;
+    clearInterval(tick); tick = null;
+    if (wakeLock) { try { wakeLock.release(); } catch (e) {} wakeLock = null; }
+  }
+  async function keepAwake() {
+    try { if ("wakeLock" in navigator) wakeLock = await navigator.wakeLock.request("screen"); } catch (e) {}
+  }
+
+  /* ---------- Hesaplama ---------- */
+  function tripDist() { return state.trip ? Math.max(0, state.odo - state.trip.startOdo) : 0; }
+  function intervals() {
+    var out = [], f = state.fills;
+    for (var i = 1; i < f.length; i++) {
+      var km = f[i].odo - f[i - 1].odo;
+      if (km >= 1) out.push({ km: km, l: f[i].liters, tl: f[i].total, ts: f[i].ts });
+    }
+    return out;
+  }
+  function rate() {
+    var iv = intervals();
+    if (!iv.length) return null;
+    var l = iv[iv.length - 1];
+    return { tlkm: l.tl / l.km, lkm: l.l / l.km };
+  }
+
+  /* ---------- Yolculuk ---------- */
+  $("tripBtn").addEventListener("click", function () {
+    if (!state.trip) {
+      state.trip = { start: Date.now(), startOdo: state.odo, max: 0, pts: [], paused: false, pausedMs: 0 };
+      save(true); startWatch(); toast("Yolculuk başladı");
+    } else {
+      var dist = tripDist(), end = Date.now(), r = rate();
+      var pausedMs = (state.trip.pausedMs || 0) + (state.trip.paused ? end - state.trip.pausedAt : 0);
+      if (last) {
+        var a = state.trip.pts, lp = a[a.length - 1];
+        if (!lp || haversine({ lat: lp[0], lon: lp[1] }, last) > 5) addPt(last, true);
+      }
+      var pts = densify(simplify(state.trip.pts, 10), 1000);
+      var name = "";
+      try {
+        var n = prompt("Yolculuğa isim ver (isteğe bağlı)", "");
+        if (n !== null) name = n.trim().slice(0, 60);
+      } catch (e) {}
+      state.trips.unshift({ id: end, name: name, start: state.trip.start, end: end, dur: end - state.trip.start - pausedMs, paused: pausedMs, km: dist, max: state.trip.max || 0,
+        cost: r ? dist * r.tlkm : null, liters: r ? dist * r.lkm : null, pts: pts });
+      state.trip = null; save(true); stopWatch();
+      toast("Kaydedildi: " + fmt(dist, 2) + " km" + (r ? " · ≈" + fmt(dist * r.tlkm, 0) + " TL" : "") + (name ? " · " + name : ""));
+    }
+    render();
+  });
+
+  $("pauseBtn").addEventListener("click", function () {
+    var t = state.trip; if (!t) return;
+    var n = Date.now();
+    if (!t.paused) { t.paused = true; t.pausedAt = n; toast("Duraklatıldı"); }
+    else {
+      t.pausedMs = (t.pausedMs || 0) + (n - t.pausedAt); t.paused = false; t.pausedAt = null;
+      if (watchId === null) startWatch();
+      toast("Devam ediyor");
+    }
+    save(true); render();
+  });
+
+  $("gpxNowBtn").addEventListener("click", function () {
+    if (!state.trip || !state.trip.pts || state.trip.pts.length < 2) {
+      toast("Henüz yeterli rota noktası yok");
+      return;
+    }
+    // Güncel konumu da ekle (varsa)
+    var pts = state.trip.pts.slice();
+    if (last) {
+      var lp = pts[pts.length - 1];
+      if (!lp || haversine({ lat: lp[0], lon: lp[1] }, last) > 5) {
+        pts.push([+last.lat.toFixed(5), +last.lon.toFixed(5), Math.round(last.t / 1000)]);
+      }
+    }
+    pts = densify(simplify(pts, 10), 1000);
+    var nm = "canli-yolculuk";
+    shareFile(nm + "-" + stamp() + ".gpx", toGpx("Canlı yolculuk", pts), "application/gpx+xml");
+    toast("GPX hazır · paylaş veya indir");
+  });
+
+  /* ---------- Ayarlar ---------- */
+  function applySettingsUI() {
+    $("limitInput").value = state.settings.limit > 0 ? state.settings.limit : "";
+    $("alertOn").checked = state.settings.alert !== false;
+  }
+  $("limitInput").addEventListener("input", function () { setLimit($("limitInput").value); render(); });
+  $("alertOn").addEventListener("change", function () { state.settings.alert = $("alertOn").checked; save(true); unlockAudio(); });
+  $("limitChip").addEventListener("click", function () {
+    var v = prompt("Hız limiti (km/sa). Kapatmak için boş bırak.", state.settings.limit > 0 ? state.settings.limit : "");
+    if (v === null) return;
+    setLimit(v); applySettingsUI(); render();
+  });
+
+  /* ---------- Yakıt ---------- */
+  function num(v) { return parseFloat(String(v).replace(",", ".")); }
+  function updTotal() {
+    var l = num($("liters").value), p = num($("price").value);
+    $("fuelTotal").textContent = fmt(l > 0 && p > 0 ? l * p : 0, 2) + " TL";
+  }
+  $("liters").addEventListener("input", updTotal);
+  $("price").addEventListener("input", updTotal);
+  $("fuelBtn").addEventListener("click", function () {
+    var d = $("fuelBox"); d.open = true; d.scrollIntoView({ behavior: "smooth", block: "start" });
+    setTimeout(function () { $("liters").focus(); }, 300);
+  });
+  $("saveFuel").addEventListener("click", function () {
+    var l = num($("liters").value), p = num($("price").value);
+    if (!(l > 0) || !(p > 0)) { toast("Litre ve birim fiyat gir"); return; }
+    state.fills.push({ id: Date.now(), ts: Date.now(), liters: l, price: p, total: l * p, odo: state.odo });
+    state.fills.sort(function (a, b) { return a.ts - b.ts; });
+    save(true);
+    $("liters").value = ""; $("price").value = ""; updTotal();
+    $("fuelBox").open = false;
+    toast("Yakıt kaydedildi"); render();
+  });
+
+  /* ---------- Konum paylaş ---------- */
+  $("shareBtn").addEventListener("click", function () {
+    setStatus("Konum alınıyor…");
+    navigator.geolocation.getCurrentPosition(function (p) {
+      var text = "Konumum: " + ptLink([p.coords.latitude, p.coords.longitude]);
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(function () { toast("Konum kopyalandı"); }, function () {});
+      window.open("https://wa.me/?text=" + encodeURIComponent(text), "_blank");
+      setStatus("Konum hazır");
+    }, onErr, { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 });
+  });
+
+  /* ---------- Acil durum ---------- */
+  var emg = $("emg");
+  function hhmm(t) { return new Date(t).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }); }
+  function hms(ms) {
+    var s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+    var pad = function (n) { return n < 10 ? "0" + n : n; };
+    return h > 0 ? h + ":" + pad(m) + ":" + pad(s % 60) : pad(m) + ":" + pad(s % 60);
+  }
+  function freshPos() {
+    return new Promise(function (res) {
+      if (!navigator.geolocation) return res(null);
+      var done = false;
+      var t = setTimeout(function () { if (!done) { done = true; res(null); } }, 9000);
+      navigator.geolocation.getCurrentPosition(function (p) {
+        if (done) return; done = true; clearTimeout(t);
+        res({ lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy, t: p.timestamp || Date.now() });
+      }, function () { if (done) return; done = true; clearTimeout(t); res(null); },
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 });
+    });
+  }
+  function setEmgButtons(on) { ["emgWA", "emgSMS", "emgCopy"].forEach(function (id) { $(id).disabled = !on; }); }
+
+  async function buildEmergency() {
+    setEmgButtons(false);
+    $("emgMsg").value = "Konum alınıyor…";
+    var pos = await freshPos(), stale = false;
+    if (!pos && state.last) { pos = state.last; stale = true; }
+
+    var src = null, pts = [];
+    if (state.trip) {
+      src = { km: tripDist(), ms: tripActiveMs(state.trip, Date.now()), max: state.trip.max || 0, name: "" };
+      pts = state.trip.pts.slice();
+    } else {
+      var t = state.trips.filter(function (x) { return x.pts && x.pts.length; })[0];
+      if (t) { src = { km: t.km, ms: t.dur != null ? t.dur : t.end - t.start, max: t.max || 0, name: t.name || "" }; pts = t.pts.slice(); }
+    }
+    if (pos) {
+      var lp = pts[pts.length - 1];
+      if (!lp || haversine({ lat: lp[0], lon: lp[1] }, pos) > 25) pts.push([pos.lat, pos.lon, Math.round(pos.t / 1000)]);
+    }
+
+    var L = ["ACİL DURUM: yardıma ihtiyacım olabilir."];
+    if (pos) L.push((stale ? "Son bilinen konum (" : "Şu anki konum (") + hhmm(pos.t) + ", ±" + Math.round(pos.acc) + " m): " + ptLink([pos.lat, pos.lon]));
+    else L.push("Konum alınamadı.");
+    if (pts.length) L.push("Başlangıç: " + ptLink(pts[0]));
+    var url = routeUrl(pts);
+    if (url) L.push("Rota (başlangıç, geçtiğim yerler, son nokta): " + url);
+    if (src) L.push("Yolculuk" + (src.name ? " (" + src.name + ")" : "") + ": " + fmt(src.km, 1) + " km, " + hms(src.ms) + ", en yüksek hız " + Math.round(src.max) + " km/sa");
+    $("emgMsg").value = L.join("\n");
+    setEmgButtons(true);
+  }
+
+  $("emgBtn").addEventListener("click", function () {
+    $("emgNum").value = state.settings.emgNum || "";
+    emg.showModal();
+    buildEmergency();
+  });
+  $("emgClose").addEventListener("click", function () { emg.close(); });
+  $("emgRefresh").addEventListener("click", buildEmergency);
+  $("emgNum").addEventListener("input", function () { state.settings.emgNum = $("emgNum").value; save(true); });
+  function target() {
+    var n = normNum($("emgNum").value);
+    if (!n) { toast("Önce numara gir"); $("emgNum").focus(); return null; }
+    return n;
+  }
+  $("emgWA").addEventListener("click", function () {
+    var n = target(); if (!n) return;
+    window.open("https://wa.me/" + n + "?text=" + encodeURIComponent($("emgMsg").value), "_blank");
+  });
+  $("emgSMS").addEventListener("click", function () {
+    var n = target(); if (!n) return;
+    window.location.href = "sms:+" + n + "?&body=" + encodeURIComponent($("emgMsg").value);
+  });
+  $("emgCopy").addEventListener("click", function () {
+    var t = $("emgMsg").value;
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(function () { toast("Mesaj kopyalandı"); }, function () { toast("Kopyalanamadı"); });
+    else { $("emgMsg").select(); toast("Metni seçip kopyala"); }
+  });
+
+  /* ---------- Liste işlemleri ---------- */
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest("[data-act]");
+    if (!b) return;
+    var act = b.getAttribute("data-act"), id = Number(b.getAttribute("data-id"));
+    var trip = state.trips.filter(function (x) { return x.id === id; })[0];
+
+    if (act === "del-fill") {
+      if (!confirm("Yakıt alımı silinsin mi?")) return;
+      state.fills = state.fills.filter(function (x) { return x.id !== id; });
+    } else if (act === "del-trip") {
+      if (!confirm("Yolculuk silinsin mi?")) return;
+      state.trips = state.trips.filter(function (x) { return x.id !== id; });
+    } else if (act === "rename" && trip) {
+      var n = prompt("Yolculuk adı", trip.name || "");
+      if (n === null) return;
+      trip.name = n.trim().slice(0, 60);
+    } else if (act === "map" && trip) {
+      var url = routeUrl(trip.pts);
+      if (!url) { toast("Bu yolculukta rota kaydı yok"); return; }
+      window.open(url, "_blank"); return;
+    } else if (act === "gpx" && trip) {
+      if (!trip.pts || trip.pts.length < 2) { toast("Bu yolculukta rota kaydı yok"); return; }
+      var nm = (trip.name || "yolculuk").replace(/[^\w\u00C0-\u024F\u011E\u011F\u0130\u0131\u015E\u015F-]+/g, "-");
+      shareFile(nm + "-" + stamp() + ".gpx", toGpx(trip.name || "Yolculuk", trip.pts), "application/gpx+xml");
+      return;
+    } else if (act === "json" && trip) {
+      var nj = (trip.name || "yolculuk").replace(/[^\w\u00C0-\u024F\u011E\u011F\u0130\u0131\u015E\u015F-]+/g, "-");
+      shareFile(nj + "-" + stamp() + ".json", tripToJson(trip), "application/json");
+      return;
+    } else return;
+    save(true); render();
+  });
+
+  /* ---------- Yedekleme ---------- */
+  $("exportBtn").addEventListener("click", function () {
+    var data = { app: "yol-defteri", version: 1, exported: new Date().toISOString(), state: state };
+    download("yol-defteri-" + stamp() + ".json", JSON.stringify(data), "application/json");
+    toast("Yedek indirildi");
+  });
+  $("importBtn").addEventListener("click", function () {
+    if (state.trip) { toast("Önce yolculuğu bitir"); return; }
+    $("importFile").click();
+  });
+  $("importFile").addEventListener("change", function (e) {
+    var f = e.target.files[0]; e.target.value = "";
+    if (!f) return;
+    var rd = new FileReader();
+    rd.onload = function () {
+      try {
+        var d = JSON.parse(rd.result), st = d && d.state;
+        if (!d || d.app !== "yol-defteri" || !st || !Array.isArray(st.fills) || !Array.isArray(st.trips) || typeof st.odo !== "number") throw 0;
+        if (!confirm(st.fills.length + " yakıt alımı, " + st.trips.length + " yolculuk yüklenecek. Mevcut veri silinip yerine konulsun mu?")) return;
+        state = { odo: st.odo, trip: null, fills: st.fills, trips: st.trips, settings: st.settings || state.settings || {}, last: state.last };
+        save(true); applySettingsUI(); render(); toast("Yedek yüklendi");
+      } catch (err) { toast("Geçersiz yedek dosyası"); }
+    };
+    rd.readAsText(f);
+  });
+
+  /* ---------- Ana ekrana ekle (PWA) ---------- */
+  var deferred = null;
+  window.addEventListener("beforeinstallprompt", function (e) {
+    e.preventDefault(); deferred = e; $("installBtn").style.display = "block";
+  });
+  $("installBtn").addEventListener("click", function () {
+    if (!deferred) return;
+    deferred.prompt(); deferred.userChoice.then(function () { deferred = null; $("installBtn").style.display = "none"; });
+  });
+  window.addEventListener("appinstalled", function () { $("installBtn").style.display = "none"; toast("Kuruldu"); });
+  if (/iphone|ipad|ipod/i.test(navigator.userAgent) && !window.navigator.standalone) {
+    $("installNote").textContent += " iPhone'da kurmak için Safari'de Paylaş → Ana Ekrana Ekle.";
+  }
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", function () { navigator.serviceWorker.register("sw.js").catch(function () {}); });
+  }
+
+  /* ---------- Çizim ---------- */
+  function dtm(ts) { return new Date(ts).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }); }
+  function cell(v, l) { return "<div class='stat'><b class='num'>" + v + "</b><span>" + l + "</span></div>"; }
+
+  function render() {
+    var active = !!state.trip;
+    $("tripBtn").textContent = active ? "Yolculuğu bitir" : "Yolculuğu başlat";
+    $("tripBtn").classList.toggle("stop", active);
+    var paused = active && !!state.trip.paused;
+    document.body.classList.toggle("moving", cur.speed > 0 && !paused);
+    document.body.classList.toggle("paused", paused);
+    document.body.classList.toggle("over", overLimit());
+    var pb = $("pauseBtn");
+    pb.style.display = active ? "block" : "none";
+    pb.textContent = paused ? "Devam et" : "Duraklat";
+    pb.classList.toggle("primary", paused);
+    var gpxBtn = $("gpxNowBtn");
+    var hasPts = active && state.trip.pts && state.trip.pts.length > 1;
+    gpxBtn.style.display = hasPts ? "block" : "none";
+    var L = state.settings.limit;
+    $("limitChip").textContent = L > 0 ? (overLimit() ? "LİMİT AŞILDI · " + L : "Hız limiti: " + L) : "Hız limiti: kapalı";
+    $("speed").textContent = Math.round(cur.speed);
+
+    var dist = tripDist();
+    var ms = active ? tripActiveMs(state.trip, Date.now()) : 0;
+    $("dist").textContent = fmt(dist, 2);
+    $("time").textContent = hms(ms);
+    $("avg").textContent = ms > 0 ? Math.round(dist / (ms / 3600000)) : 0;
+
+    var rt = rate(), est = $("est");
+    if (paused) est.innerHTML = "<b>Duraklatıldı</b> · süre ve yol sayılmıyor";
+    else if (active && rt) est.innerHTML = "Tahmini maliyet: <b class='num'>≈ " + fmt(dist * rt.tlkm, 2) + " TL</b> · " + fmt(dist * rt.lkm, 2) + " L";
+    else if (active) est.textContent = "Maliyet tahmini için iki yakıt alımı kaydet";
+    else est.textContent = "";
+
+    var iv = intervals(), cons = $("cons");
+    if (!iv.length) {
+      cons.innerHTML = "";
+      $("consNote").textContent = state.fills.length < 2
+        ? "Hesap için en az iki yakıt alımı gerekir. İlk alımı kaydet, yol yap, sonraki alımı kaydet."
+        : "İki alım arasında yeterli yol kaydedilmedi.";
+    } else {
+      var l = iv[iv.length - 1], tk = iv.reduce(function (a, x) { return a + x.km; }, 0),
+          tl = iv.reduce(function (a, x) { return a + x.l; }, 0), tt = iv.reduce(function (a, x) { return a + x.tl; }, 0);
+      cons.innerHTML =
+        cell(fmt(l.l / l.km * 100, 2), "litre / 100 km (son)") +
+        cell(fmt(l.tl / l.km, 2) + " TL", "TL / km (son)") +
+        cell(fmt(l.l / l.km, 3), "litre / km (son)") +
+        cell(fmt(l.tl / l.km * 100, 0) + " TL", "TL / 100 km (son)") +
+        cell(fmt(tl / tk * 100, 2), "litre / 100 km (ortalama)") +
+        cell(fmt(tt / tk, 2) + " TL", "TL / km (ortalama)");
+      $("consNote").textContent = "Son aralık: " + fmt(l.km, 1) + " km, " + fmt(l.l, 2) + " L, " + fmt(l.tl, 2) + " TL.";
+    }
+    var spent = state.fills.reduce(function (a, f) { return a + f.total; }, 0);
+    $("totals").textContent = "Kayıtlı toplam: " + fmt(state.odo, 1) + " km yol, " + fmt(spent, 2) + " TL yakıt harcaması (" + state.fills.length + " alım).";
+
+    $("fuelList").innerHTML = state.fills.length ? state.fills.slice().reverse().map(function (f) {
+      return "<li><div class='t num'>" + fmt(f.liters, 2) + " L × " + fmt(f.price, 2) + " TL = " + fmt(f.total, 2) + " TL</div>" +
+        "<small>" + dtm(f.ts) + " · sayaç " + fmt(f.odo, 1) + " km</small>" +
+        "<div class='acts'><button data-act='del-fill' data-id='" + f.id + "'>Sil</button></div></li>";
+    }).join("") : "<div class='empty'>Henüz yakıt alımı yok.</div>";
+
+    $("tripList").innerHTML = state.trips.length ? state.trips.map(function (t) {
+      var hasRoute = t.pts && t.pts.length > 1;
+      return "<li><div class='t'>" + esc(t.name || "Yolculuk") + "</div>" +
+        "<small class='num'>" + fmt(t.km, 2) + " km · " + hms(t.dur != null ? t.dur : t.end - t.start) + (t.paused > 60000 ? " (mola " + hms(t.paused) + ")" : "") + " · en yüksek " + Math.round(t.max) + " km/sa" +
+        (t.cost != null ? " · ≈" + fmt(t.cost, 0) + " TL, " + fmt(t.liters, 1) + " L" : "") + "<br>" + dtm(t.start) + "</small>" +
+        "<div class='acts'><button data-act='rename' data-id='" + t.id + "'>Düzenle</button>" +
+        (hasRoute ? "<button data-act='map' data-id='" + t.id + "'>Haritada aç</button><button class='share' data-act='gpx' data-id='" + t.id + "'>GPX paylaş</button>" : "") +
+        "<button class='share' data-act='json' data-id='" + t.id + "'>JSON paylaş</button>" +
+        "<button data-act='del-trip' data-id='" + t.id + "'>Sil</button></div></li>";
+    }).join("") : "<div class='empty'>Henüz yolculuk yok. Rota kaydı olan yolculuklarda <b>GPX paylaş</b> ile dosyayı indirebilir veya paylaşabilirsin.</div>";
+  }
+
+  /* ---------- Başlangıç ---------- */
+  applySettingsUI();
+  render();
+  if (state.trip) { setStatus("Yolculuk devam ediyor…"); startWatch(); }
+})();
+</script>
+</body>
+</html>
