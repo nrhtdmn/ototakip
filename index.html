@@ -65,7 +65,7 @@
   .body { padding: 0 16px 16px; }
 
   label { display: block; color: var(--dim); font-size: 13px; margin: 10px 0 4px; }
-  input, textarea { width: 100%; font: inherit; font-size: 18px; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+  input, textarea, select { width: 100%; font: inherit; font-size: 18px; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
   textarea { font-size: 14px; line-height: 1.45; resize: vertical; }
   .total { margin: 12px 0; color: var(--dim); }
   .total b { color: var(--text); font-size: 20px; }
@@ -80,8 +80,7 @@
   li .t { font-size: 16px; font-weight: 600; }
   li small { color: var(--dim); display: block; margin-top: 3px; line-height: 1.4; }
   .acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-  .acts button { width: auto; padding: 8px 12px; font-size: 13px; background: var(--bg); color: var(--dim); border-radius: 10px; }
-  .acts button.share { color: var(--accent); font-weight: 600; }
+  .acts button { width: auto; padding: 7px 12px; font-size: 13px; background: var(--bg); color: var(--dim); border-radius: 10px; }
   .empty { color: var(--dim); font-size: 14px; padding: 4px 0; }
 
   .backup { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -116,7 +115,6 @@
 
 <button class="primary" id="tripBtn">Yolculuğu başlat</button>
 <button class="full" id="pauseBtn" style="display:none">Duraklat</button>
-<button class="full" id="gpxNowBtn" style="display:none">Mevcut rotayı GPX paylaş</button>
 <div class="row">
   <button id="shareBtn">Konumumu gönder</button>
   <button id="fuelBtn">Yakıt aldım</button>
@@ -147,10 +145,7 @@
 
 <details>
   <summary>Yolculuklar</summary>
-  <div class="body">
-    <ul id="tripList"></ul>
-    <p class="note">GPX dosyasını harita uygulamalarında (Google Earth, OsmAnd, Strava vb.) açabilir veya arkadaşlarına gönderebilirsin. Canlı yolculuk sırasında da ana ekrandaki “Mevcut rotayı GPX paylaş” düğmesini kullanabilirsin.</p>
-  </div>
+  <div class="body"><ul id="tripList"></ul></div>
 </details>
 
 <details>
@@ -158,13 +153,19 @@
   <div class="body"><ul id="fuelList"></ul></div>
 </details>
 
-<details>
+<details id="settingsBox">
   <summary>Ayarlar</summary>
   <div class="body">
-    <label for="limitInput">Hız limiti (km/sa), boşsa kapalı</label>
+    <label for="limitMode">Hız limiti</label>
+    <select id="limitMode">
+      <option value="auto">Otomatik (harita verisinden)</option>
+      <option value="manual">Elle gir</option>
+      <option value="off">Kapalı</option>
+    </select>
+    <label for="limitInput">Elle limit (km/sa)</label>
     <input id="limitInput" type="number" inputmode="numeric" min="0" max="300" step="1" placeholder="örn. 110">
     <label style="display:flex;gap:10px;align-items:center;color:var(--text);font-size:15px;margin-top:14px"><input id="alertOn" type="checkbox" style="width:22px;height:22px;padding:0"> Aşınca sesli ve titreşimli uyar</label>
-    <p class="note">Limit aşılınca hız rakamı kırmızı olur. Ses için telefonun sessiz modda olmaması gerekir. Titreşim yalnızca Android'de çalışır. Limiti ana ekrandaki "Hız limiti" düğmesine dokunarak da değiştirebilirsin.</p>
+    <p class="note">Otomatik modda bulunduğun yolun limiti OpenStreetMap verisinden internetle çekilir. Yolun limiti haritada işlenmemişse limit bilinmiyor sayılır ve uyarı verilmez. Veri her yerde eksiksiz değildir, özellikle şehir içi sokaklarda eksik olabilir. Limit aşılınca hız rakamı kırmızı olur. Titreşim yalnızca Android'de çalışır.</p>
   </div>
 </details>
 
@@ -328,6 +329,54 @@ function tripToJson(t) {
     points: (t.pts || []).map(function (p) { return { lat: p[0], lon: p[1], time: new Date(p[2] * 1000).toISOString() }; })
   }, null, 2);
 }
+// OSM maxspeed etiketini km/sa'e çevir. Anlaşılamazsa 0 (bilinmiyor)
+function parseMaxspeed(v) {
+  if (v === null || v === undefined) return 0;
+  var s = String(v).trim().toLowerCase(), m;
+  m = s.match(/^(\d{1,3})(\s*km\/h)?$/);
+  if (m) { var n = parseInt(m[1], 10); return n >= 5 && n <= 160 ? n : 0; }
+  m = s.match(/^(\d{1,3})\s*mph$/);
+  if (m) return Math.round(parseInt(m[1], 10) * 1.609);
+  return 0;
+}
+function bearing(a, b) {
+  var r = Math.PI / 180, y = Math.sin((b.lon - a.lon) * r) * Math.cos(b.lat * r);
+  var x = Math.cos(a.lat * r) * Math.sin(b.lat * r) - Math.sin(a.lat * r) * Math.cos(b.lat * r) * Math.cos((b.lon - a.lon) * r);
+  return (Math.atan2(y, x) / r + 360) % 360;
+}
+// yönsüz açı farkı 0..90
+function angDiff(a, b) {
+  var d = Math.abs(((a - b + 540) % 360) - 180);
+  return Math.min(d, 180 - d);
+}
+// Nokta ile yol geometrisi ({lat,lon} listesi) arası en kısa uzaklık (m) ve o parçanın yönü
+function nearestOnWay(lat, lon, geom) {
+  var k = Math.cos(lat * Math.PI / 180), best = Infinity, brg = 0;
+  var px = lon * k * 111320, py = lat * 110540;
+  for (var i = 0; i < geom.length - 1; i++) {
+    var ax = geom[i].lon * k * 111320, ay = geom[i].lat * 110540;
+    var bx = geom[i + 1].lon * k * 111320, by = geom[i + 1].lat * 110540;
+    var dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy, t = 0;
+    if (l2 > 0) { t = ((px - ax) * dx + (py - ay) * dy) / l2; t = Math.max(0, Math.min(1, t)); }
+    var cx = ax + t * dx, cy = ay + t * dy;
+    var d = Math.sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy));
+    if (d < best) { best = d; brg = (Math.atan2(dx, dy) * 180 / Math.PI + 360) % 360; }
+  }
+  return { d: best, brg: brg };
+}
+var SKIP_HW = { footway: 1, path: 1, cycleway: 1, pedestrian: 1, steps: 1, bridleway: 1, corridor: 1, construction: 1, proposed: 1, platform: 1, track: 1 };
+// Overpass sonucundan konuma en uygun (yakın ve gidiş yönüne paralel) taşıt yolunu seç
+function chooseWay(elements, lat, lon, heading, maxD) {
+  var best = null;
+  (elements || []).forEach(function (el) {
+    if (el.type !== "way" || !el.geometry || el.geometry.length < 2 || !el.tags || !el.tags.highway || SKIP_HW[el.tags.highway]) return;
+    var nn = nearestOnWay(lat, lon, el.geometry);
+    if (nn.d > maxD) return;
+    var score = nn.d + (heading !== null && heading !== undefined && angDiff(nn.brg, heading) > 50 ? 30 : 0);
+    if (!best || score < best.score) best = { el: el, d: nn.d, score: score };
+  });
+  return best;
+}
 /* PURE-END */
 
 (function () {
@@ -394,7 +443,63 @@ function tripToJson(t) {
       o.start(); o.stop(t0 + 0.4);
     } catch (e) {}
   }
-  function overLimit() { var L = state.settings.limit; return L > 0 && cur.speed > L; }
+  function limitMode() { return state.settings.limitMode || "auto"; }
+  var auto = { limit: 0, way: null, state: "idle", busy: false, lastQ: null, nextTry: 0, gen: 0 };
+  function resetAuto() { auto.gen++; auto.limit = 0; auto.way = null; auto.state = "idle"; auto.busy = false; auto.lastQ = null; auto.nextTry = 0; }
+  function effectiveLimit() {
+    var m = limitMode();
+    if (m === "manual") return state.settings.limit > 0 ? state.settings.limit : 0;
+    if (m === "auto") return auto.limit;
+    return 0;
+  }
+  function overLimit() { var L = effectiveLimit(); return L > 0 && cur.speed > L; }
+
+  var OVERPASS = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"];
+  async function overpass(q) {
+    var lastErr = new Error("overpass");
+    for (var i = 0; i < OVERPASS.length; i++) {
+      var ctl = new AbortController();
+      var to = setTimeout(function () { ctl.abort(); }, 8000);
+      try {
+        var r = await fetch(OVERPASS[i] + "?data=" + encodeURIComponent(q), { signal: ctl.signal });
+        clearTimeout(to);
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return await r.json();
+      } catch (e) { clearTimeout(to); lastErr = e; }
+    }
+    throw lastErr;
+  }
+  async function autoQuery(pos, heading) {
+    var gen = auto.gen;
+    auto.busy = true; auto.state = "loading";
+    auto.lastQ = { lat: pos.lat, lon: pos.lon, t: Date.now() };
+    try {
+      var q = "[out:json][timeout:10];way(around:35," + pos.lat.toFixed(5) + "," + pos.lon.toFixed(5) + ')["highway"];out tags geom;';
+      var data = await overpass(q);
+      if (gen !== auto.gen) return;
+      var pick = chooseWay(data.elements, pos.lat, pos.lon, heading, Math.max(30, pos.acc || 0));
+      if (pick) { auto.way = pick.el.geometry; auto.limit = parseMaxspeed(pick.el.tags.maxspeed); auto.state = "ok"; }
+      else { auto.way = null; auto.limit = 0; auto.state = "nodata"; }
+      auto.nextTry = 0;
+    } catch (e) {
+      if (gen !== auto.gen) return;
+      auto.way = null; auto.limit = 0; auto.state = "err"; auto.nextTry = Date.now() + 20000;
+    }
+    auto.busy = false;
+    render();
+  }
+  // Aynı yolda kaldıkça tekrar sorgulamaz; yoldan ayrılınca veya yol bilinmiyorsa yeniden sorar
+  function autoTick(pos, heading) {
+    if (limitMode() !== "auto" || (state.trip && state.trip.paused)) return;
+    var now = Date.now();
+    if (auto.way) {
+      var nn = nearestOnWay(pos.lat, pos.lon, auto.way);
+      if (nn.d <= Math.max(25, pos.acc || 0)) return;
+    }
+    if (auto.busy || now < auto.nextTry) return;
+    if (auto.lastQ && (cur.speed < 3 || now - auto.lastQ.t < 4000)) return;
+    autoQuery(pos, heading);
+  }
   function alertIfOver() {
     if (!overLimit() || state.settings.alert === false) return;
     var n = Date.now();
@@ -445,6 +550,7 @@ function tripToJson(t) {
     var c = p.coords, now = p.timestamp || Date.now();
     var pt = { lat: c.latitude, lon: c.longitude, t: now, acc: c.accuracy };
     var good = c.accuracy <= 50;
+    var heading = (typeof c.heading === "number" && !isNaN(c.heading) && c.speed > 1.5) ? c.heading : null;
     var v = null; // m/s
     if (typeof c.speed === "number" && !isNaN(c.speed) && c.speed >= 0) v = c.speed;
     if (good) state.last = { lat: pt.lat, lon: pt.lon, acc: pt.acc, t: now };
@@ -453,6 +559,7 @@ function tripToJson(t) {
       var dt = (now - last.t) / 1000;
       var d = haversine(last, pt);
       if (v === null && dt > 0) v = d / dt;
+      if (heading === null && d > 8) heading = bearing(last, pt);
       var plausible = dt > 0 && d / dt < 70;           // 250 km/sa üstü sıçramaları ele
       var moved = d > Math.max(4, c.accuracy * 0.25) && (v === null || v > 0.8);
       if (state.trip && !state.trip.paused && good && plausible && moved) {
@@ -469,6 +576,7 @@ function tripToJson(t) {
     if (cur.speed < 2) cur.speed = 0;
     if (state.trip && !state.trip.paused && cur.speed > (state.trip.max || 0)) state.trip.max = cur.speed;
     alertIfOver();
+    if (good && watchId !== null) autoTick({ lat: pt.lat, lon: pt.lon, acc: pt.acc }, heading);
     setStatus(good ? "GPS iyi (±" + Math.round(c.accuracy) + " m)" : "GPS zayıf (±" + Math.round(c.accuracy) + " m)", !good);
     save();
     render();
@@ -481,14 +589,14 @@ function tripToJson(t) {
   function startWatch() {
     if (!("geolocation" in navigator)) { setStatus("Bu cihaz konumu desteklemiyor", true); return; }
     if (watchId !== null) return;
-    last = null;
+    last = null; resetAuto();
     watchId = navigator.geolocation.watchPosition(onPos, onErr, { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 });
     keepAwake();
     tick = setInterval(render, 1000);
   }
   function stopWatch() {
     if (watchId !== null) navigator.geolocation.clearWatch(watchId);
-    watchId = null; last = null; cur.speed = 0;
+    watchId = null; last = null; cur.speed = 0; resetAuto();
     clearInterval(tick); tick = null;
     if (wakeLock) { try { wakeLock.release(); } catch (e) {} wakeLock = null; }
   }
@@ -526,15 +634,10 @@ function tripToJson(t) {
         if (!lp || haversine({ lat: lp[0], lon: lp[1] }, last) > 5) addPt(last, true);
       }
       var pts = densify(simplify(state.trip.pts, 10), 1000);
-      var name = "";
-      try {
-        var n = prompt("Yolculuğa isim ver (isteğe bağlı)", "");
-        if (n !== null) name = n.trim().slice(0, 60);
-      } catch (e) {}
-      state.trips.unshift({ id: end, name: name, start: state.trip.start, end: end, dur: end - state.trip.start - pausedMs, paused: pausedMs, km: dist, max: state.trip.max || 0,
+      state.trips.unshift({ id: end, name: "", start: state.trip.start, end: end, dur: end - state.trip.start - pausedMs, paused: pausedMs, km: dist, max: state.trip.max || 0,
         cost: r ? dist * r.tlkm : null, liters: r ? dist * r.lkm : null, pts: pts });
       state.trip = null; save(true); stopWatch();
-      toast("Kaydedildi: " + fmt(dist, 2) + " km" + (r ? " · ≈" + fmt(dist * r.tlkm, 0) + " TL" : "") + (name ? " · " + name : ""));
+      toast("Kaydedildi: " + fmt(dist, 2) + " km" + (r ? " · ≈" + fmt(dist * r.tlkm, 0) + " TL" : ""));
     }
     render();
   });
@@ -551,36 +654,19 @@ function tripToJson(t) {
     save(true); render();
   });
 
-  $("gpxNowBtn").addEventListener("click", function () {
-    if (!state.trip || !state.trip.pts || state.trip.pts.length < 2) {
-      toast("Henüz yeterli rota noktası yok");
-      return;
-    }
-    // Güncel konumu da ekle (varsa)
-    var pts = state.trip.pts.slice();
-    if (last) {
-      var lp = pts[pts.length - 1];
-      if (!lp || haversine({ lat: lp[0], lon: lp[1] }, last) > 5) {
-        pts.push([+last.lat.toFixed(5), +last.lon.toFixed(5), Math.round(last.t / 1000)]);
-      }
-    }
-    pts = densify(simplify(pts, 10), 1000);
-    var nm = "canli-yolculuk";
-    shareFile(nm + "-" + stamp() + ".gpx", toGpx("Canlı yolculuk", pts), "application/gpx+xml");
-    toast("GPX hazır · paylaş veya indir");
-  });
-
   /* ---------- Ayarlar ---------- */
   function applySettingsUI() {
+    $("limitMode").value = limitMode();
     $("limitInput").value = state.settings.limit > 0 ? state.settings.limit : "";
     $("alertOn").checked = state.settings.alert !== false;
   }
   $("limitInput").addEventListener("input", function () { setLimit($("limitInput").value); render(); });
   $("alertOn").addEventListener("change", function () { state.settings.alert = $("alertOn").checked; save(true); unlockAudio(); });
+  $("limitMode").addEventListener("change", function () {
+    state.settings.limitMode = $("limitMode").value; resetAuto(); save(true); render();
+  });
   $("limitChip").addEventListener("click", function () {
-    var v = prompt("Hız limiti (km/sa). Kapatmak için boş bırak.", state.settings.limit > 0 ? state.settings.limit : "");
-    if (v === null) return;
-    setLimit(v); applySettingsUI(); render();
+    var d = $("settingsBox"); d.open = true; d.scrollIntoView({ behavior: "smooth", block: "start" });
   });
 
   /* ---------- Yakıt ---------- */
@@ -789,11 +875,14 @@ function tripToJson(t) {
     pb.style.display = active ? "block" : "none";
     pb.textContent = paused ? "Devam et" : "Duraklat";
     pb.classList.toggle("primary", paused);
-    var gpxBtn = $("gpxNowBtn");
-    var hasPts = active && state.trip.pts && state.trip.pts.length > 1;
-    gpxBtn.style.display = hasPts ? "block" : "none";
-    var L = state.settings.limit;
-    $("limitChip").textContent = L > 0 ? (overLimit() ? "LİMİT AŞILDI · " + L : "Hız limiti: " + L) : "Hız limiti: kapalı";
+    var L = effectiveLimit(), lm = limitMode(), ct;
+    if (L > 0) ct = (overLimit() ? "LİMİT AŞILDI · " : "Hız limiti: ") + L + (lm === "auto" ? " (oto)" : "");
+    else if (lm !== "auto") ct = "Hız limiti: kapalı";
+    else if (watchId === null) ct = "Hız limiti: otomatik";
+    else if (auto.state === "loading" || auto.state === "idle") ct = "Hız limiti aranıyor…";
+    else if (auto.state === "err") ct = "Hız limiti: veri yok";
+    else ct = "Hız limiti: bilinmiyor";
+    $("limitChip").textContent = ct;
     $("speed").textContent = Math.round(cur.speed);
 
     var dist = tripDist();
@@ -841,10 +930,10 @@ function tripToJson(t) {
         "<small class='num'>" + fmt(t.km, 2) + " km · " + hms(t.dur != null ? t.dur : t.end - t.start) + (t.paused > 60000 ? " (mola " + hms(t.paused) + ")" : "") + " · en yüksek " + Math.round(t.max) + " km/sa" +
         (t.cost != null ? " · ≈" + fmt(t.cost, 0) + " TL, " + fmt(t.liters, 1) + " L" : "") + "<br>" + dtm(t.start) + "</small>" +
         "<div class='acts'><button data-act='rename' data-id='" + t.id + "'>Düzenle</button>" +
-        (hasRoute ? "<button data-act='map' data-id='" + t.id + "'>Haritada aç</button><button class='share' data-act='gpx' data-id='" + t.id + "'>GPX paylaş</button>" : "") +
-        "<button class='share' data-act='json' data-id='" + t.id + "'>JSON paylaş</button>" +
+        (hasRoute ? "<button data-act='map' data-id='" + t.id + "'>Haritada aç</button><button data-act='gpx' data-id='" + t.id + "'>GPX</button>" : "") +
+        "<button data-act='json' data-id='" + t.id + "'>JSON</button>" +
         "<button data-act='del-trip' data-id='" + t.id + "'>Sil</button></div></li>";
-    }).join("") : "<div class='empty'>Henüz yolculuk yok. Rota kaydı olan yolculuklarda <b>GPX paylaş</b> ile dosyayı indirebilir veya paylaşabilirsin.</div>";
+    }).join("") : "<div class='empty'>Henüz yolculuk yok.</div>";
   }
 
   /* ---------- Başlangıç ---------- */
