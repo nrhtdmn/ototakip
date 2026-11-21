@@ -92,6 +92,16 @@
   dialog h2 { margin: 0 0 4px; font-size: 22px; color: var(--bad); }
   dialog .row button, dialog .full { font-size: 15px; padding: 14px; }
 
+  .road { text-align: center; color: var(--dim); font-size: 12px; margin-top: 6px; min-height: 14px; padding: 0 8px; }
+  .place { text-align: center; font-size: 15px; font-weight: 600; margin-top: 8px; display: none; }
+  .tag { display: inline-block; background: var(--bg); color: var(--accent); border-radius: 6px; padding: 1px 7px; font-size: 12px; font-weight: 600; margin-right: 6px; vertical-align: 1px; }
+  li.grp { color: var(--dim); font-size: 13px; font-weight: 600; padding: 16px 0 6px; border-top: 0; }
+  li.grp:first-child { padding-top: 4px; }
+  .chk { display: flex; gap: 10px; align-items: center; color: var(--text); font-size: 15px; margin-top: 14px; }
+  .chk input { width: 22px; height: 22px; padding: 0; }
+  .sm { font-size: 15px; padding: 14px; background: var(--bg); margin-top: 8px; }
+  .credit { text-align: center; color: var(--dim); font-size: 12px; margin-top: 28px; }
+  #tripDlg h2 { color: var(--text); }
   .toast { position: fixed; left: 50%; bottom: max(20px, env(safe-area-inset-bottom)); transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 10px; font-size: 14px; opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 10; max-width: 90vw; text-align: center; }
   .toast.show { opacity: 1; }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
@@ -103,6 +113,8 @@
   <div class="v num" id="speed">0</div>
   <div class="u">km/sa</div>
   <button class="chip" id="limitChip" type="button">Hız limiti: kapalı</button>
+  <div class="road" id="roadInfo"></div>
+  <div class="place" id="placeNow"></div>
 </div>
 
 <div class="stats">
@@ -111,6 +123,7 @@
   <div class="stat"><b class="num" id="avg">0</b><span>ort. km/sa</span></div>
 </div>
 <div class="est" id="est"></div>
+<div class="est" id="today"></div>
 <div class="status" id="status">Hazır</div>
 
 <button class="primary" id="tripBtn">Yolculuğu başlat</button>
@@ -143,14 +156,43 @@
   </div>
 </details>
 
-<details>
+<details id="tripsBox">
   <summary>Yolculuklar</summary>
-  <div class="body"><ul id="tripList"></ul></div>
+  <div class="body">
+    <button id="addTripBtn" class="sm" style="margin-top:0">Elle yolculuk ekle</button>
+    <label for="catFilter">Kategori</label>
+    <select id="catFilter"></select>
+    <p class="note num" id="tripSum"></p>
+    <ul id="tripList"></ul>
+  </div>
+</details>
+
+<details>
+  <summary>Günlük yakıt ve ücret</summary>
+  <div class="body">
+    <p class="note" id="dayNote">Tahminler, son yakıt aralığındaki tüketime göre hesaplanır.</p>
+    <ul id="dayList"></ul>
+  </div>
 </details>
 
 <details>
   <summary>Yakıt alımları</summary>
   <div class="body"><ul id="fuelList"></ul></div>
+</details>
+
+<details id="placesBox">
+  <summary>Kayıtlı konumlar</summary>
+  <div class="body">
+    <ul id="placeList"></ul>
+    <label for="placeName">Yeni konum adı</label>
+    <input id="placeName" type="text" maxlength="40" placeholder="örn. Ev, İş yeri, Benzinlik">
+    <label for="placeCoord">Koordinat veya harita linki (boşsa şu anki konumun)</label>
+    <input id="placeCoord" type="text" placeholder="38.42370, 27.14280">
+    <button id="placeAdd" class="primary" style="font-size:17px;padding:14px;margin-top:12px">Konumu kaydet</button>
+    <label for="placeRadius">Eşleşme yarıçapı (metre)</label>
+    <input id="placeRadius" type="number" inputmode="numeric" min="5" max="500" step="5" placeholder="30">
+    <p class="note">Yolculuk sırasında kayıtlı bir konuma bu yarıçap içinde olduğunda ana ekranda adı yazar. Yolculuğun başlangıç ve bitiş yeri de ad olarak kaydedilir (Ev → İş gibi). Konum paylaşımında ve acil durum mesajında da ad görünür.</p>
+  </div>
 </details>
 
 <details id="settingsBox">
@@ -164,8 +206,18 @@
     </select>
     <label for="limitInput">Elle limit (km/sa)</label>
     <input id="limitInput" type="number" inputmode="numeric" min="0" max="300" step="1" placeholder="örn. 110">
-    <label style="display:flex;gap:10px;align-items:center;color:var(--text);font-size:15px;margin-top:14px"><input id="alertOn" type="checkbox" style="width:22px;height:22px;padding:0"> Aşınca sesli ve titreşimli uyar</label>
-    <p class="note">Otomatik modda bulunduğun yolun limiti OpenStreetMap verisinden internetle çekilir. Yolun limiti haritada işlenmemişse limit bilinmiyor sayılır ve uyarı verilmez. Veri her yerde eksiksiz değildir, özellikle şehir içi sokaklarda eksik olabilir. Limit aşılınca hız rakamı kırmızı olur. Titreşim yalnızca Android'de çalışır.</p>
+    <label class="chk"><input id="alertOn" type="checkbox"> Aşınca sesli ve titreşimli uyar</label>
+    <label class="chk"><input id="estOn" type="checkbox"> Haritada limit yoksa yol türüne göre tahmin kullan</label>
+    <button id="limitTestBtn" class="sm">Limit verisini şu konumda dene</button>
+    <p class="note" id="limitTest"></p>
+    <p class="note">Otomatik modda bulunduğun yolun limiti OpenStreetMap verisinden internetle çekilir. Yolun limiti haritada işlenmemişse limit bilinmiyor sayılır ve uyarı verilmez. Tahmin seçeneği açıksa yalnızca şu kurallar kullanılır: otoyol 120, bölünmüş devlet yolu 110, diğer devlet yolu 90, mahalle içi yol 50 ve ekranda "tahmini" yazar.</p>
+
+    <label for="catsInput">Yolculuk kategorileri (virgülle ayır)</label>
+    <input id="catsInput" type="text" placeholder="İş, Özel, Aile, Tatil">
+    <label for="defCat">Yeni yolculuğun kategorisi</label>
+    <select id="defCat"></select>
+
+    <label class="chk"><input id="awakeOn" type="checkbox"> Uygulama açıkken ekran kapanmasın</label>
   </div>
 </details>
 
@@ -176,6 +228,7 @@
       <button id="exportBtn">Yedeği indir</button>
       <button id="importBtn">Yedeği yükle</button>
     </div>
+    <button id="csvBtn" class="sm">Yolculukları CSV (Excel) indir</button>
     <input id="importFile" type="file" accept="application/json,.json">
     <button id="installBtn" style="margin-top:8px;font-size:15px;padding:14px;background:var(--bg);display:none">Ana ekrana ekle</button>
     <p class="note" id="installNote">Yedek dosyası tüm yakıt alımlarını, yolculukları, rotaları ve km sayacını içerir. Tarayıcı verisini silmeden veya telefon değiştirmeden önce indir.</p>
@@ -199,6 +252,28 @@
   <button id="emgCopy" class="full" disabled>Mesajı kopyala</button>
   <p class="note">Mesaj hazır açılır, son adımda gönder tuşuna sen basarsın. Web uygulaması kendi başına SMS veya WhatsApp gönderemez. Bağlantılar Google Haritalar'da açılır: başlangıç, geçtiğin yerler ve son nokta rotada görünür.</p>
 </dialog>
+
+<dialog id="tripDlg">
+  <h2 id="tdTitle">Yolculuk</h2>
+  <label for="tdName">Ad (boşsa Nereden → Nereye yazar)</label>
+  <input id="tdName" type="text" maxlength="60">
+  <label for="tdCat">Kategori</label>
+  <select id="tdCat"></select>
+  <label for="tdKm">Mesafe (km)</label>
+  <input id="tdKm" type="number" inputmode="decimal" step="0.1" min="0">
+  <div id="tdTimeBox">
+    <label for="tdWhen">Başlangıç zamanı</label>
+    <input id="tdWhen" type="datetime-local">
+    <label for="tdDur">Süre (dakika, isteğe bağlı)</label>
+    <input id="tdDur" type="number" inputmode="numeric" min="0" step="1">
+  </div>
+  <div class="row" style="margin-top:16px">
+    <button id="tdSave" class="primary" style="font-size:17px;padding:14px">Kaydet</button>
+    <button id="tdCancel" style="font-size:17px;padding:14px">Vazgeç</button>
+  </div>
+</dialog>
+
+<div class="credit">Nurhat Duman tarafından geliştirilmiştir.</div>
 
 <div class="toast" id="toast"></div>
 
@@ -377,6 +452,32 @@ function chooseWay(elements, lat, lon, heading, maxD) {
   });
   return best;
 }
+// "38.4237, 27.1428" veya Google Haritalar linkinden [enlem, boylam]
+function parseCoords(t) {
+  t = String(t || "");
+  var m = t.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/) || t.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/) ||
+    t.match(/[?&](?:q|ll|query)=(-?\d+\.\d+)(?:,|%2C)(-?\d+\.\d+)/) || t.match(/(-?\d{1,2}\.\d+)\s*[,;\s]\s*(-?\d{1,3}\.\d+)/);
+  if (!m) return null;
+  var lat = parseFloat(m[1]), lon = parseFloat(m[2]);
+  return (Math.abs(lat) <= 90 && Math.abs(lon) <= 180) ? [lat, lon] : null;
+}
+// Yarıçap (m) içindeki en yakın kayıtlı konum
+function placeAt(places, lat, lon, radius) {
+  var best = null, bd = Infinity;
+  (places || []).forEach(function (p) {
+    var d = haversine({ lat: lat, lon: lon }, { lat: p.lat, lon: p.lon });
+    if (d <= radius && d < bd) { best = p; bd = d; }
+  });
+  return best;
+}
+// Haritada maxspeed yoksa yol türüne göre kaba tahmin (yalnızca kullanıcı isterse)
+function estimateLimit(tags) {
+  var h = tags && tags.highway;
+  if (h === "motorway") return 120;
+  if (h === "trunk") return tags.oneway === "yes" ? 110 : 90;
+  if (h === "residential") return 50;
+  return 0;
+}
 /* PURE-END */
 
 (function () {
@@ -395,15 +496,17 @@ function chooseWay(elements, lat, lon, heading, maxD) {
       var s = JSON.parse(localStorage.getItem(KEY));
       if (s && s.fills && s.trips) {
         s.settings = s.settings || {};
+        s.places = s.places || [];
         if (s.trip && !s.trip.pts) s.trip.pts = [];
         return s;
       }
     } catch (e) {}
-    return { odo: 0, trip: null, fills: [], trips: [], settings: {}, last: null };
+    return { odo: 0, trip: null, fills: [], trips: [], settings: {}, places: [], last: null };
   }
-  var lastSave = 0;
+  var lastSave = 0, listVer = 0, drawnVer = -1;
   function save(force) {
     var n = Date.now();
+    if (force) listVer++;
     if (!force && n - lastSave < 4000) return;
     lastSave = n;
     try { localStorage.setItem(KEY, JSON.stringify(state)); }
@@ -412,7 +515,7 @@ function chooseWay(elements, lat, lon, heading, maxD) {
   window.addEventListener("pagehide", function () { save(true); });
   document.addEventListener("visibilitychange", function () {
     if (document.visibilityState === "hidden") save(true);
-    else if (state.trip) keepAwake();
+    else keepAwake();
   });
 
   function toast(msg) {
@@ -444,8 +547,8 @@ function chooseWay(elements, lat, lon, heading, maxD) {
     } catch (e) {}
   }
   function limitMode() { return state.settings.limitMode || "auto"; }
-  var auto = { limit: 0, way: null, state: "idle", busy: false, lastQ: null, nextTry: 0, gen: 0 };
-  function resetAuto() { auto.gen++; auto.limit = 0; auto.way = null; auto.state = "idle"; auto.busy = false; auto.lastQ = null; auto.nextTry = 0; }
+  var auto = { limit: 0, est: false, info: "", way: null, state: "idle", busy: false, lastQ: null, nextTry: 0, gen: 0 };
+  function resetAuto() { auto.gen++; auto.limit = 0; auto.est = false; auto.info = ""; auto.way = null; auto.state = "idle"; auto.busy = false; auto.lastQ = null; auto.nextTry = 0; }
   function effectiveLimit() {
     var m = limitMode();
     if (m === "manual") return state.settings.limit > 0 ? state.settings.limit : 0;
@@ -454,36 +557,58 @@ function chooseWay(elements, lat, lon, heading, maxD) {
   }
   function overLimit() { var L = effectiveLimit(); return L > 0 && cur.speed > L; }
 
-  var OVERPASS = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"];
+  var OVERPASS = ["https://overpass-api.de/api/interpreter", "https://overpass.private.coffee/api/interpreter", "https://overpass.kumi.systems/api/interpreter"];
   async function overpass(q) {
-    var lastErr = new Error("overpass");
+    var errs = [];
     for (var i = 0; i < OVERPASS.length; i++) {
+      var host = OVERPASS[i].split("/")[2];
       var ctl = new AbortController();
-      var to = setTimeout(function () { ctl.abort(); }, 8000);
+      var to = setTimeout(function () { ctl.abort(); }, 9000);
       try {
         var r = await fetch(OVERPASS[i] + "?data=" + encodeURIComponent(q), { signal: ctl.signal });
         clearTimeout(to);
         if (!r.ok) throw new Error("HTTP " + r.status);
-        return await r.json();
-      } catch (e) { clearTimeout(to); lastErr = e; }
+        var data = await r.json();
+        if (data && data.remark && /error|timed out|too many/i.test(data.remark)) throw new Error("sunucu meşgul");
+        return data;
+      } catch (e) {
+        clearTimeout(to);
+        var m = e && e.name === "AbortError" ? "zaman aşımı" : (e && e.name === "SyntaxError" ? "geçersiz yanıt" : (e && e.message) || "hata");
+        errs.push(host + ": " + m);
+      }
     }
-    throw lastErr;
+    throw new Error(errs.join(" | "));
+  }
+  function roadDesc(tags) { return [tags.highway, tags.ref, tags.name].filter(Boolean).join(" · "); }
+  // Konumdaki yolu ve limitini bul
+  async function lookupRoad(pos, heading) {
+    var q = "[out:json][timeout:10];way(around:35," + pos.lat.toFixed(5) + "," + pos.lon.toFixed(5) + ')["highway"];out tags geom;';
+    var data = await overpass(q);
+    var pick = chooseWay(data.elements, pos.lat, pos.lon, heading, Math.max(30, pos.acc || 0));
+    if (!pick) return { pick: null };
+    var tags = pick.el.tags, lim = parseMaxspeed(tags.maxspeed), est = false;
+    if (!(lim > 0) && state.settings.estLimit) { lim = estimateLimit(tags); est = lim > 0; }
+    return { pick: pick, geom: pick.el.geometry, tags: tags, limit: lim, est: est };
   }
   async function autoQuery(pos, heading) {
     var gen = auto.gen;
     auto.busy = true; auto.state = "loading";
     auto.lastQ = { lat: pos.lat, lon: pos.lon, t: Date.now() };
     try {
-      var q = "[out:json][timeout:10];way(around:35," + pos.lat.toFixed(5) + "," + pos.lon.toFixed(5) + ')["highway"];out tags geom;';
-      var data = await overpass(q);
+      var r = await lookupRoad(pos, heading);
       if (gen !== auto.gen) return;
-      var pick = chooseWay(data.elements, pos.lat, pos.lon, heading, Math.max(30, pos.acc || 0));
-      if (pick) { auto.way = pick.el.geometry; auto.limit = parseMaxspeed(pick.el.tags.maxspeed); auto.state = "ok"; }
-      else { auto.way = null; auto.limit = 0; auto.state = "nodata"; }
+      if (r.pick) {
+        auto.way = r.geom; auto.limit = r.limit; auto.est = r.est; auto.state = "ok";
+        auto.info = roadDesc(r.tags) + (r.limit > 0 ? "" : " · limit işlenmemiş");
+      } else {
+        auto.way = null; auto.limit = 0; auto.est = false; auto.state = "nodata"; auto.info = "Yakında taşıt yolu bulunamadı";
+      }
       auto.nextTry = 0;
     } catch (e) {
       if (gen !== auto.gen) return;
-      auto.way = null; auto.limit = 0; auto.state = "err"; auto.nextTry = Date.now() + 20000;
+      auto.way = null; auto.limit = 0; auto.est = false; auto.state = "err"; auto.nextTry = Date.now() + 15000;
+      var parts = String((e && e.message) || e).split(" | ");
+      auto.info = "Veri alınamadı: " + parts[0] + (parts.length > 1 ? " (+" + (parts.length - 1) + ")" : "");
     }
     auto.busy = false;
     render();
@@ -553,7 +678,10 @@ function chooseWay(elements, lat, lon, heading, maxD) {
     var heading = (typeof c.heading === "number" && !isNaN(c.heading) && c.speed > 1.5) ? c.heading : null;
     var v = null; // m/s
     if (typeof c.speed === "number" && !isNaN(c.speed) && c.speed >= 0) v = c.speed;
-    if (good) state.last = { lat: pt.lat, lon: pt.lon, acc: pt.acc, t: now };
+    if (good) {
+      state.last = { lat: pt.lat, lon: pt.lon, acc: pt.acc, t: now };
+      cur.place = placeAt(state.places, pt.lat, pt.lon, radius());
+    }
 
     if (last) {
       var dt = (now - last.t) / 1000;
@@ -570,6 +698,7 @@ function chooseWay(elements, lat, lon, heading, maxD) {
     } else if (good) {
       last = pt;
       if (state.trip && !state.trip.pts.length) addPt(pt, true);
+      if (state.trip && state.trip.from === undefined) state.trip.from = cur.place ? cur.place.name : "";
     }
 
     cur.speed = (v || 0) * 3.6;
@@ -597,14 +726,30 @@ function chooseWay(elements, lat, lon, heading, maxD) {
   function stopWatch() {
     if (watchId !== null) navigator.geolocation.clearWatch(watchId);
     watchId = null; last = null; cur.speed = 0; resetAuto();
-    clearInterval(tick); tick = null;
-    if (wakeLock) { try { wakeLock.release(); } catch (e) {} wakeLock = null; }
+    clearInterval(tick); tick = null; cur.place = null;
   }
+  // Uygulama açıkken ekran kapanmasın (ayarlardan kapatılabilir)
+  var wakeBusy = false;
   async function keepAwake() {
-    try { if ("wakeLock" in navigator) wakeLock = await navigator.wakeLock.request("screen"); } catch (e) {}
+    if (state.settings.keepAwake === false || wakeLock || wakeBusy || !("wakeLock" in navigator) || document.visibilityState !== "visible") return;
+    wakeBusy = true;
+    try {
+      var wl = await navigator.wakeLock.request("screen");
+      wakeLock = wl;
+      wl.addEventListener("release", function () { if (wakeLock === wl) wakeLock = null; });
+    } catch (e) { wakeLock = null; }
+    wakeBusy = false;
   }
+  function releaseAwake() { if (wakeLock) { try { wakeLock.release(); } catch (e) {} wakeLock = null; } }
 
   /* ---------- Hesaplama ---------- */
+  function radius() { return Math.max(5, parseInt(state.settings.placeRadius, 10) || 30); }
+  // Elle eklenen/düzeltilen km sayaca ve ilgili yakıt alımlarının sayacına işlenir
+  function applyOdoDelta(anchorTs, delta) {
+    state.odo += delta;
+    state.fills.forEach(function (f) { if (f.ts >= anchorTs) f.odo += delta; });
+    if (state.trip) state.trip.startOdo += delta;
+  }
   function tripDist() { return state.trip ? Math.max(0, state.odo - state.trip.startOdo) : 0; }
   function intervals() {
     var out = [], f = state.fills;
@@ -634,7 +779,9 @@ function chooseWay(elements, lat, lon, heading, maxD) {
         if (!lp || haversine({ lat: lp[0], lon: lp[1] }, last) > 5) addPt(last, true);
       }
       var pts = densify(simplify(state.trip.pts, 10), 1000);
-      state.trips.unshift({ id: end, name: "", start: state.trip.start, end: end, dur: end - state.trip.start - pausedMs, paused: pausedMs, km: dist, max: state.trip.max || 0,
+      var tp = last ? placeAt(state.places, last.lat, last.lon, radius()) : cur.place;
+      state.trips.unshift({ id: end, name: "", cat: state.settings.defCat || "", from: state.trip.from || "", to: tp ? tp.name : "",
+        start: state.trip.start, end: end, dur: end - state.trip.start - pausedMs, paused: pausedMs, km: dist, max: state.trip.max || 0,
         cost: r ? dist * r.tlkm : null, liters: r ? dist * r.lkm : null, pts: pts });
       state.trip = null; save(true); stopWatch();
       toast("Kaydedildi: " + fmt(dist, 2) + " km" + (r ? " · ≈" + fmt(dist * r.tlkm, 0) + " TL" : ""));
@@ -659,6 +806,11 @@ function chooseWay(elements, lat, lon, heading, maxD) {
     $("limitMode").value = limitMode();
     $("limitInput").value = state.settings.limit > 0 ? state.settings.limit : "";
     $("alertOn").checked = state.settings.alert !== false;
+    $("estOn").checked = !!state.settings.estLimit;
+    $("awakeOn").checked = state.settings.keepAwake !== false;
+    $("catsInput").value = cats().join(", ");
+    $("placeRadius").value = state.settings.placeRadius > 0 ? state.settings.placeRadius : "";
+    fillCatSelects();
   }
   $("limitInput").addEventListener("input", function () { setLimit($("limitInput").value); render(); });
   $("alertOn").addEventListener("change", function () { state.settings.alert = $("alertOn").checked; save(true); unlockAudio(); });
@@ -667,6 +819,103 @@ function chooseWay(elements, lat, lon, heading, maxD) {
   });
   $("limitChip").addEventListener("click", function () {
     var d = $("settingsBox"); d.open = true; d.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+
+  $("estOn").addEventListener("change", function () { state.settings.estLimit = $("estOn").checked; resetAuto(); save(true); render(); });
+  $("awakeOn").addEventListener("change", function () {
+    state.settings.keepAwake = $("awakeOn").checked; save(true);
+    if ($("awakeOn").checked) keepAwake(); else releaseAwake();
+  });
+  $("catsInput").addEventListener("change", function () {
+    var seen = {}, list = [];
+    $("catsInput").value.split(",").forEach(function (x) {
+      x = x.trim().slice(0, 30);
+      if (x && !seen[x.toLowerCase()]) { seen[x.toLowerCase()] = 1; list.push(x); }
+    });
+    state.settings.cats = list; save(true); fillCatSelects(); render();
+  });
+  $("defCat").addEventListener("change", function () { state.settings.defCat = $("defCat").value; save(true); });
+  $("placeRadius").addEventListener("input", function () {
+    var n = parseInt($("placeRadius").value, 10);
+    state.settings.placeRadius = n > 0 ? Math.min(n, 500) : 0; save(true);
+  });
+  $("catFilter").addEventListener("change", function () { tripLimit = 40; listVer++; render(); });
+
+  $("limitTestBtn").addEventListener("click", function () {
+    var out = $("limitTest");
+    if (!navigator.geolocation) { out.textContent = "Bu cihaz konumu desteklemiyor."; return; }
+    out.textContent = "Konum alınıyor…";
+    navigator.geolocation.getCurrentPosition(async function (p) {
+      var pos = { lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy };
+      out.textContent = "Harita verisi sorgulanıyor…";
+      try {
+        var r = await lookupRoad(pos, null);
+        if (!r.pick) out.textContent = "Bağlantı çalışıyor ama 35 m çevrede taşıt yolu bulunamadı. Bir yolun üzerinde dene.";
+        else out.textContent = "Bağlantı çalışıyor. Yol: " + roadDesc(r.tags) + ". " +
+          (r.limit > 0 ? "Limit: " + r.limit + " km/sa" + (r.est ? " (tahmini)" : "") + "." : "Haritada bu yolun limiti işlenmemiş.");
+      } catch (e) { out.textContent = "Veri alınamadı: " + ((e && e.message) || e); }
+    }, function () { out.textContent = "Konum alınamadı."; }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 });
+  });
+
+  /* ---------- Kayıtlı konumlar ---------- */
+  $("placeAdd").addEventListener("click", function () {
+    var name = $("placeName").value.trim().slice(0, 40);
+    if (!name) { toast("Konum adı gir"); return; }
+    function done(lat, lon) {
+      state.places.push({ id: Date.now(), name: name, lat: +lat.toFixed(6), lon: +lon.toFixed(6) });
+      $("placeName").value = ""; $("placeCoord").value = "";
+      save(true); render(); toast("Konum kaydedildi");
+    }
+    var c = parseCoords($("placeCoord").value);
+    if (c) { done(c[0], c[1]); return; }
+    if ($("placeCoord").value.trim()) { toast("Koordinat anlaşılamadı. Örnek: 38.4237, 27.1428"); return; }
+    if (!navigator.geolocation) { toast("Bu cihaz konumu desteklemiyor"); return; }
+    toast("Konum alınıyor…");
+    navigator.geolocation.getCurrentPosition(function (p) { done(p.coords.latitude, p.coords.longitude); },
+      function () { toast("Konum alınamadı"); }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+  });
+
+  /* ---------- Elle yolculuk / düzenleme ---------- */
+  var tdTrip = null;
+  function toLocalInput(ts) { return new Date(ts - new Date(ts).getTimezoneOffset() * 60000).toISOString().slice(0, 16); }
+  function openTripDlg(t) {
+    tdTrip = t || null;
+    fillCatSelects();
+    $("tdTitle").textContent = t ? "Yolculuğu düzenle" : "Elle yolculuk ekle";
+    $("tdName").value = t ? (t.name || "") : "";
+    $("tdCat").value = t ? (t.cat || "") : (state.settings.defCat || "");
+    if ($("tdCat").selectedIndex < 0) $("tdCat").selectedIndex = 0;
+    $("tdKm").value = t ? +Number(t.km).toFixed(2) : "";
+    var showTime = !t || t.manual;
+    $("tdTimeBox").style.display = showTime ? "block" : "none";
+    $("tdWhen").value = toLocalInput(t ? t.start : Date.now());
+    $("tdDur").value = t && t.manual ? Math.round((t.dur || 0) / 60000) : "";
+    $("tripDlg").showModal();
+  }
+  function recost(t) { var r = rate(); if (r) { t.cost = t.km * r.tlkm; t.liters = t.km * r.lkm; } }
+  $("addTripBtn").addEventListener("click", function () { openTripDlg(null); });
+  $("tdCancel").addEventListener("click", function () { $("tripDlg").close(); });
+  $("tdSave").addEventListener("click", function () {
+    var km = num($("tdKm").value);
+    if (!(km >= 0) || (!tdTrip && !(km > 0))) { toast("Mesafeyi km olarak gir"); return; }
+    var name = $("tdName").value.trim().slice(0, 60), cat = $("tdCat").value;
+    if (!tdTrip || tdTrip.manual) {
+      var when = Date.parse($("tdWhen").value); if (isNaN(when)) when = Date.now();
+      var durMs = Math.max(0, (parseInt($("tdDur").value, 10) || 0) * 60000);
+      if (!tdTrip) {
+        var nt = { id: Date.now(), name: name, cat: cat, from: "", to: "", start: when, end: when + durMs, dur: durMs, paused: 0, km: km, max: 0, cost: null, liters: null, pts: [], manual: true };
+        recost(nt); state.trips.push(nt); applyOdoDelta(when, km);
+      } else {
+        applyOdoDelta(tdTrip.start, -tdTrip.km);
+        tdTrip.name = name; tdTrip.cat = cat; tdTrip.start = when; tdTrip.end = when + durMs; tdTrip.dur = durMs; tdTrip.km = km;
+        applyOdoDelta(when, km); recost(tdTrip);
+      }
+    } else {
+      var old = tdTrip.km;
+      if (km !== old) { applyOdoDelta(tdTrip.end, km - old); tdTrip.km = km; recost(tdTrip); }
+      tdTrip.name = name; tdTrip.cat = cat;
+    }
+    $("tripDlg").close(); save(true); render(); toast("Kaydedildi");
   });
 
   /* ---------- Yakıt ---------- */
@@ -696,7 +945,8 @@ function chooseWay(elements, lat, lon, heading, maxD) {
   $("shareBtn").addEventListener("click", function () {
     setStatus("Konum alınıyor…");
     navigator.geolocation.getCurrentPosition(function (p) {
-      var text = "Konumum: " + ptLink([p.coords.latitude, p.coords.longitude]);
+      var pl = placeAt(state.places, p.coords.latitude, p.coords.longitude, radius());
+      var text = "Konumum" + (pl ? " (" + pl.name + ")" : "") + ": " + ptLink([p.coords.latitude, p.coords.longitude]);
       if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(function () { toast("Konum kopyalandı"); }, function () {});
       window.open("https://wa.me/?text=" + encodeURIComponent(text), "_blank");
       setStatus("Konum hazır");
@@ -737,17 +987,19 @@ function chooseWay(elements, lat, lon, heading, maxD) {
       pts = state.trip.pts.slice();
     } else {
       var t = state.trips.filter(function (x) { return x.pts && x.pts.length; })[0];
-      if (t) { src = { km: t.km, ms: t.dur != null ? t.dur : t.end - t.start, max: t.max || 0, name: t.name || "" }; pts = t.pts.slice(); }
+      if (t) { src = { km: t.km, ms: t.dur != null ? t.dur : t.end - t.start, max: t.max || 0, name: tripLabel(t) }; pts = t.pts.slice(); }
     }
     if (pos) {
       var lp = pts[pts.length - 1];
       if (!lp || haversine({ lat: lp[0], lon: lp[1] }, pos) > 25) pts.push([pos.lat, pos.lon, Math.round(pos.t / 1000)]);
     }
 
+    var pl = pos ? placeAt(state.places, pos.lat, pos.lon, radius()) : null;
+    var sp = pts.length ? placeAt(state.places, pts[0][0], pts[0][1], radius()) : null;
     var L = ["ACİL DURUM: yardıma ihtiyacım olabilir."];
-    if (pos) L.push((stale ? "Son bilinen konum (" : "Şu anki konum (") + hhmm(pos.t) + ", ±" + Math.round(pos.acc) + " m): " + ptLink([pos.lat, pos.lon]));
+    if (pos) L.push((stale ? "Son bilinen konum (" : "Şu anki konum (") + hhmm(pos.t) + ", ±" + Math.round(pos.acc) + " m)" + (pl ? " – " + pl.name : "") + ": " + ptLink([pos.lat, pos.lon]));
     else L.push("Konum alınamadı.");
-    if (pts.length) L.push("Başlangıç: " + ptLink(pts[0]));
+    if (pts.length) L.push("Başlangıç" + (sp ? " (" + sp.name + ")" : "") + ": " + ptLink(pts[0]));
     var url = routeUrl(pts);
     if (url) L.push("Rota (başlangıç, geçtiğim yerler, son nokta): " + url);
     if (src) L.push("Yolculuk" + (src.name ? " (" + src.name + ")" : "") + ": " + fmt(src.km, 1) + " km, " + hms(src.ms) + ", en yüksek hız " + Math.round(src.max) + " km/sa");
@@ -788,30 +1040,49 @@ function chooseWay(elements, lat, lon, heading, maxD) {
     if (!b) return;
     var act = b.getAttribute("data-act"), id = Number(b.getAttribute("data-id"));
     var trip = state.trips.filter(function (x) { return x.id === id; })[0];
+    var place = state.places.filter(function (x) { return x.id === id; })[0];
+    var fill = state.fills.filter(function (x) { return x.id === id; })[0];
+    var safe = function (t) { return (t || "yolculuk").replace(/[^\w\u00C0-\u024F\u011E\u011F\u0130\u0131\u015E\u015F-]+/g, "-"); };
 
-    if (act === "del-fill") {
+    if (act === "del-fill" && fill) {
       if (!confirm("Yakıt alımı silinsin mi?")) return;
       state.fills = state.fills.filter(function (x) { return x.id !== id; });
-    } else if (act === "del-trip") {
+    } else if (act === "edit-fill" && fill) {
+      var l = prompt("Litre", String(fill.liters).replace(".", ","));
+      if (l === null) return;
+      var pr = prompt("Birim fiyat (TL/litre)", String(fill.price).replace(".", ","));
+      if (pr === null) return;
+      var ln = num(l), pn = num(pr);
+      if (!(ln > 0) || !(pn > 0)) { toast("Geçersiz değer"); return; }
+      fill.liters = ln; fill.price = pn; fill.total = ln * pn;
+    } else if (act === "del-trip" && trip) {
       if (!confirm("Yolculuk silinsin mi?")) return;
+      if (trip.manual) applyOdoDelta(trip.start, -trip.km);
       state.trips = state.trips.filter(function (x) { return x.id !== id; });
-    } else if (act === "rename" && trip) {
-      var n = prompt("Yolculuk adı", trip.name || "");
-      if (n === null) return;
-      trip.name = n.trim().slice(0, 60);
+    } else if (act === "edit-trip" && trip) {
+      openTripDlg(trip); return;
     } else if (act === "map" && trip) {
       var url = routeUrl(trip.pts);
       if (!url) { toast("Bu yolculukta rota kaydı yok"); return; }
       window.open(url, "_blank"); return;
     } else if (act === "gpx" && trip) {
       if (!trip.pts || trip.pts.length < 2) { toast("Bu yolculukta rota kaydı yok"); return; }
-      var nm = (trip.name || "yolculuk").replace(/[^\w\u00C0-\u024F\u011E\u011F\u0130\u0131\u015E\u015F-]+/g, "-");
-      shareFile(nm + "-" + stamp() + ".gpx", toGpx(trip.name || "Yolculuk", trip.pts), "application/gpx+xml");
+      shareFile(safe(tripLabel(trip)) + "-" + stamp() + ".gpx", toGpx(tripLabel(trip), trip.pts), "application/gpx+xml");
       return;
     } else if (act === "json" && trip) {
-      var nj = (trip.name || "yolculuk").replace(/[^\w\u00C0-\u024F\u011E\u011F\u0130\u0131\u015E\u015F-]+/g, "-");
-      shareFile(nj + "-" + stamp() + ".json", tripToJson(trip), "application/json");
+      shareFile(safe(tripLabel(trip)) + "-" + stamp() + ".json", tripToJson(trip), "application/json");
       return;
+    } else if (act === "place-ren" && place) {
+      var n = prompt("Konum adı", place.name);
+      if (n === null || !n.trim()) return;
+      place.name = n.trim().slice(0, 40);
+    } else if (act === "place-del" && place) {
+      if (!confirm("Kayıtlı konum silinsin mi?")) return;
+      state.places = state.places.filter(function (x) { return x.id !== id; });
+    } else if (act === "place-map" && place) {
+      window.open(ptLink([place.lat, place.lon]), "_blank"); return;
+    } else if (act === "more-trips") {
+      tripLimit += 40; listVer++; render(); return;
     } else return;
     save(true); render();
   });
@@ -821,6 +1092,17 @@ function chooseWay(elements, lat, lon, heading, maxD) {
     var data = { app: "yol-defteri", version: 1, exported: new Date().toISOString(), state: state };
     download("yol-defteri-" + stamp() + ".json", JSON.stringify(data), "application/json");
     toast("Yedek indirildi");
+  });
+  $("csvBtn").addEventListener("click", function () {
+    var rt = rate(), cn = function (n, d) { return Number(n).toFixed(d).replace(".", ","); };
+    var rows = [["Tarih", "Saat", "Ad", "Kategori", "Nereden", "Nereye", "Km", "Süre (dk)", "En yüksek hız (km/sa)", "Tahmini litre", "Tahmini TL", "Elle eklendi"]];
+    state.trips.slice().sort(function (a, b) { return a.start - b.start; }).forEach(function (t) {
+      var f = tripFuel(t, rt), d = new Date(t.start);
+      rows.push([d.toLocaleDateString("tr-TR"), d.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }), tripLabel(t), t.cat || "", t.from || "", t.to || "",
+        cn(t.km, 2), Math.round((t.dur != null ? t.dur : t.end - t.start) / 60000), Math.round(t.max || 0), f.l != null ? cn(f.l, 2) : "", f.c != null ? cn(f.c, 2) : "", t.manual ? "evet" : ""]);
+    });
+    var csv = "\ufeff" + rows.map(function (r) { return r.map(function (c) { return '"' + String(c).replace(/"/g, '""') + '"'; }).join(";"); }).join("\r\n");
+    shareFile("yolculuklar-" + stamp() + ".csv", csv, "text/csv");
   });
   $("importBtn").addEventListener("click", function () {
     if (state.trip) { toast("Önce yolculuğu bitir"); return; }
@@ -835,7 +1117,7 @@ function chooseWay(elements, lat, lon, heading, maxD) {
         var d = JSON.parse(rd.result), st = d && d.state;
         if (!d || d.app !== "yol-defteri" || !st || !Array.isArray(st.fills) || !Array.isArray(st.trips) || typeof st.odo !== "number") throw 0;
         if (!confirm(st.fills.length + " yakıt alımı, " + st.trips.length + " yolculuk yüklenecek. Mevcut veri silinip yerine konulsun mu?")) return;
-        state = { odo: st.odo, trip: null, fills: st.fills, trips: st.trips, settings: st.settings || state.settings || {}, last: state.last };
+        state = { odo: st.odo, trip: null, fills: st.fills, trips: st.trips, settings: st.settings || state.settings || {}, places: Array.isArray(st.places) ? st.places : state.places, last: state.last };
         save(true); applySettingsUI(); render(); toast("Yedek yüklendi");
       } catch (err) { toast("Geçersiz yedek dosyası"); }
     };
@@ -862,6 +1144,108 @@ function chooseWay(elements, lat, lon, heading, maxD) {
   /* ---------- Çizim ---------- */
   function dtm(ts) { return new Date(ts).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }); }
   function cell(v, l) { return "<div class='stat'><b class='num'>" + v + "</b><span>" + l + "</span></div>"; }
+  function dayKey(ts) { var d = new Date(ts); return d.getFullYear() + "-" + (d.getMonth() + 1) + "-" + d.getDate(); }
+  function cats() { return Array.isArray(state.settings.cats) ? state.settings.cats : ["İş", "Özel", "Aile", "Tatil"]; }
+  function allCats() {
+    var out = cats().slice();
+    state.trips.forEach(function (t) { if (t.cat && out.indexOf(t.cat) < 0) out.push(t.cat); });
+    return out;
+  }
+  function tripLabel(t) {
+    if (t.name) return t.name;
+    if (t.from && t.to) return t.from + " → " + t.to;
+    if (t.from) return t.from + " çıkışlı";
+    if (t.to) return t.to + " varışlı";
+    return "Yolculuk";
+  }
+  function tripFuel(t, rt) {
+    var l = t.liters, c = t.cost;
+    if ((l == null || c == null) && rt) { l = t.km * rt.lkm; c = t.km * rt.tlkm; }
+    return { l: l, c: c };
+  }
+  function sumTrips(list, rt) {
+    var o = { n: list.length, km: 0, l: 0, c: 0, fuel: false };
+    list.forEach(function (t) {
+      o.km += t.km;
+      var f = tripFuel(t, rt);
+      if (f.l != null) { o.l += f.l; o.c += f.c; o.fuel = true; }
+    });
+    return o;
+  }
+  function sumLine(o) { return fmt(o.km, 1) + " km" + (o.fuel ? " · ≈" + fmt(o.l, 1) + " L · ≈" + fmt(o.c, 0) + " TL" : ""); }
+  var tripLimit = 40;
+  function fillCatSelects() {
+    var fill = function (id, first, list) {
+      var el = $(id), v = el.value;
+      el.innerHTML = first.concat(list.map(function (c) { return [c, c]; })).map(function (o) {
+        return "<option value='" + esc(o[0]) + "'>" + esc(o[1]) + "</option>";
+      }).join("");
+      el.value = v;
+      if (el.selectedIndex < 0) el.selectedIndex = 0;
+    };
+    fill("catFilter", [["", "Tümü"], ["__none", "Kategorisiz"]], allCats());
+    fill("tdCat", [["", "Kategorisiz"]], allCats());
+    fill("defCat", [["", "Kategorisiz"]], cats());
+    $("defCat").value = state.settings.defCat || "";
+    if ($("defCat").selectedIndex < 0) $("defCat").selectedIndex = 0;
+  }
+
+  // Listeler yalnızca veri değişince yeniden çizilir (her saniye çizilirse dokunuşlar kaçar)
+  function drawLists(rt) {
+    $("fuelList").innerHTML = state.fills.length ? state.fills.slice().reverse().map(function (f) {
+      return "<li><div class='t num'>" + fmt(f.liters, 2) + " L × " + fmt(f.price, 2) + " TL = " + fmt(f.total, 2) + " TL</div>" +
+        "<small>" + dtm(f.ts) + " · sayaç " + fmt(f.odo, 1) + " km</small>" +
+        "<div class='acts'><button data-act='edit-fill' data-id='" + f.id + "'>Düzenle</button><button data-act='del-fill' data-id='" + f.id + "'>Sil</button></div></li>";
+    }).join("") : "<div class='empty'>Henüz yakıt alımı yok.</div>";
+
+    $("placeList").innerHTML = state.places.length ? state.places.map(function (p) {
+      return "<li><div class='t'>" + esc(p.name) + "</div><small class='num'>" + p.lat.toFixed(5) + ", " + p.lon.toFixed(5) + "</small>" +
+        "<div class='acts'><button data-act='place-ren' data-id='" + p.id + "'>Adı değiştir</button><button data-act='place-map' data-id='" + p.id + "'>Haritada aç</button><button data-act='place-del' data-id='" + p.id + "'>Sil</button></div></li>";
+    }).join("") : "<div class='empty'>Henüz kayıtlı konum yok.</div>";
+
+    // Yolculuklar: kategori süzgeci, aya göre gruplama
+    var f = $("catFilter").value;
+    var all = state.trips.slice().sort(function (a, b) { return b.start - a.start; }).filter(function (t) {
+      return f === "" ? true : (f === "__none" ? !t.cat : t.cat === f);
+    });
+    $("tripSum").textContent = all.length + " yolculuk · " + sumLine(sumTrips(all, rt));
+    var months = {};
+    all.forEach(function (t) {
+      var m = new Date(t.start).toLocaleDateString("tr-TR", { month: "long", year: "numeric" });
+      (months[m] = months[m] || []).push(t);
+    });
+    var html = "", curM = "";
+    all.slice(0, tripLimit).forEach(function (t) {
+      var m = new Date(t.start).toLocaleDateString("tr-TR", { month: "long", year: "numeric" });
+      if (m !== curM) { curM = m; html += "<li class='grp'>" + esc(m) + " · " + months[m].length + " yolculuk · " + sumLine(sumTrips(months[m], rt)) + "</li>"; }
+      var fu = tripFuel(t, rt), dur = t.dur != null ? t.dur : t.end - t.start, hasRoute = t.pts && t.pts.length > 1;
+      html += "<li><div class='t'>" + (t.cat ? "<span class='tag'>" + esc(t.cat) + "</span>" : "") + esc(tripLabel(t)) + "</div>" +
+        "<small class='num'>" + fmt(t.km, 2) + " km" + (dur > 0 ? " · " + hms(dur) : "") + (t.paused > 60000 ? " (mola " + hms(t.paused) + ")" : "") +
+        (t.manual ? " · elle eklendi" : " · en yüksek " + Math.round(t.max) + " km/sa") +
+        (fu.l != null ? " · ≈" + fmt(fu.c, 0) + " TL, " + fmt(fu.l, 1) + " L" : "") + "<br>" + dtm(t.start) + "</small>" +
+        "<div class='acts'><button data-act='edit-trip' data-id='" + t.id + "'>Düzenle</button>" +
+        (hasRoute ? "<button data-act='map' data-id='" + t.id + "'>Haritada aç</button><button data-act='gpx' data-id='" + t.id + "'>GPX</button>" : "") +
+        "<button data-act='json' data-id='" + t.id + "'>JSON</button>" +
+        "<button data-act='del-trip' data-id='" + t.id + "'>Sil</button></div></li>";
+    });
+    if (all.length > tripLimit) html += "<li><div class='acts'><button data-act='more-trips'>Daha fazla göster (" + (all.length - tripLimit) + ")</button></div></li>";
+    $("tripList").innerHTML = html || "<div class='empty'>Bu kategoride yolculuk yok.</div>";
+
+    // Günlük özet
+    var days = {}, order = [];
+    state.trips.forEach(function (t) {
+      var k = dayKey(t.start);
+      if (!days[k]) { days[k] = { ts: t.start, list: [] }; order.push(k); }
+      days[k].list.push(t);
+      if (t.start > days[k].ts) days[k].ts = t.start;
+    });
+    order.sort(function (a, b) { return days[b].ts - days[a].ts; });
+    $("dayList").innerHTML = order.length ? order.slice(0, 60).map(function (k) {
+      var d = days[k];
+      return "<li><div class='t'>" + new Date(d.ts).toLocaleDateString("tr-TR", { day: "numeric", month: "long", weekday: "short" }) + "</div>" +
+        "<small class='num'>" + d.list.length + " yolculuk · " + sumLine(sumTrips(d.list, rt)) + "</small></li>";
+    }).join("") : "<div class='empty'>Henüz yolculuk yok.</div>";
+  }
 
   function render() {
     var active = !!state.trip;
@@ -875,14 +1259,19 @@ function chooseWay(elements, lat, lon, heading, maxD) {
     pb.style.display = active ? "block" : "none";
     pb.textContent = paused ? "Devam et" : "Duraklat";
     pb.classList.toggle("primary", paused);
+
     var L = effectiveLimit(), lm = limitMode(), ct;
-    if (L > 0) ct = (overLimit() ? "LİMİT AŞILDI · " : "Hız limiti: ") + L + (lm === "auto" ? " (oto)" : "");
+    if (L > 0) ct = (overLimit() ? "LİMİT AŞILDI · " : "Hız limiti: ") + L + (lm === "auto" ? (auto.est ? " (tahmini)" : " (oto)") : "");
     else if (lm !== "auto") ct = "Hız limiti: kapalı";
     else if (watchId === null) ct = "Hız limiti: otomatik";
     else if (auto.state === "loading" || auto.state === "idle") ct = "Hız limiti aranıyor…";
     else if (auto.state === "err") ct = "Hız limiti: veri yok";
     else ct = "Hız limiti: bilinmiyor";
     $("limitChip").textContent = ct;
+    $("roadInfo").textContent = (lm === "auto" && watchId !== null) ? auto.info : "";
+    var pn = $("placeNow");
+    if (cur.place && watchId !== null) { pn.textContent = "Konum: " + cur.place.name; pn.style.display = "block"; }
+    else pn.style.display = "none";
     $("speed").textContent = Math.round(cur.speed);
 
     var dist = tripDist();
@@ -893,9 +1282,16 @@ function chooseWay(elements, lat, lon, heading, maxD) {
 
     var rt = rate(), est = $("est");
     if (paused) est.innerHTML = "<b>Duraklatıldı</b> · süre ve yol sayılmıyor";
-    else if (active && rt) est.innerHTML = "Tahmini maliyet: <b class='num'>≈ " + fmt(dist * rt.tlkm, 2) + " TL</b> · " + fmt(dist * rt.lkm, 2) + " L";
+    else if (active && rt) est.innerHTML = "Yolculuk tahmini: <b class='num'>≈ " + fmt(dist * rt.tlkm, 2) + " TL</b> · " + fmt(dist * rt.lkm, 2) + " L";
     else if (active) est.textContent = "Maliyet tahmini için iki yakıt alımı kaydet";
     else est.textContent = "";
+
+    // Bugün: kayıtlı yolculuklar + süren yolculuk
+    var tk = dayKey(Date.now());
+    var o = sumTrips(state.trips.filter(function (t) { return dayKey(t.start) === tk; }), rt);
+    if (active) { o.km += dist; if (rt) { o.l += dist * rt.lkm; o.c += dist * rt.tlkm; o.fuel = true; } }
+    $("today").innerHTML = "Bugün: <b class='num'>" + fmt(o.km, 1) + " km</b>" +
+      (o.fuel ? " · ≈" + fmt(o.l, 1) + " L · ≈<b class='num'>" + fmt(o.c, 0) + " TL</b>" : (rt ? "" : " · yakıt için iki alım kaydet"));
 
     var iv = intervals(), cons = $("cons");
     if (!iv.length) {
@@ -904,41 +1300,28 @@ function chooseWay(elements, lat, lon, heading, maxD) {
         ? "Hesap için en az iki yakıt alımı gerekir. İlk alımı kaydet, yol yap, sonraki alımı kaydet."
         : "İki alım arasında yeterli yol kaydedilmedi.";
     } else {
-      var l = iv[iv.length - 1], tk = iv.reduce(function (a, x) { return a + x.km; }, 0),
+      var l = iv[iv.length - 1], tk2 = iv.reduce(function (a, x) { return a + x.km; }, 0),
           tl = iv.reduce(function (a, x) { return a + x.l; }, 0), tt = iv.reduce(function (a, x) { return a + x.tl; }, 0);
       cons.innerHTML =
         cell(fmt(l.l / l.km * 100, 2), "litre / 100 km (son)") +
         cell(fmt(l.tl / l.km, 2) + " TL", "TL / km (son)") +
         cell(fmt(l.l / l.km, 3), "litre / km (son)") +
         cell(fmt(l.tl / l.km * 100, 0) + " TL", "TL / 100 km (son)") +
-        cell(fmt(tl / tk * 100, 2), "litre / 100 km (ortalama)") +
-        cell(fmt(tt / tk, 2) + " TL", "TL / km (ortalama)");
+        cell(fmt(tl / tk2 * 100, 2), "litre / 100 km (ortalama)") +
+        cell(fmt(tt / tk2, 2) + " TL", "TL / km (ortalama)");
       $("consNote").textContent = "Son aralık: " + fmt(l.km, 1) + " km, " + fmt(l.l, 2) + " L, " + fmt(l.tl, 2) + " TL.";
     }
     var spent = state.fills.reduce(function (a, f) { return a + f.total; }, 0);
     $("totals").textContent = "Kayıtlı toplam: " + fmt(state.odo, 1) + " km yol, " + fmt(spent, 2) + " TL yakıt harcaması (" + state.fills.length + " alım).";
 
-    $("fuelList").innerHTML = state.fills.length ? state.fills.slice().reverse().map(function (f) {
-      return "<li><div class='t num'>" + fmt(f.liters, 2) + " L × " + fmt(f.price, 2) + " TL = " + fmt(f.total, 2) + " TL</div>" +
-        "<small>" + dtm(f.ts) + " · sayaç " + fmt(f.odo, 1) + " km</small>" +
-        "<div class='acts'><button data-act='del-fill' data-id='" + f.id + "'>Sil</button></div></li>";
-    }).join("") : "<div class='empty'>Henüz yakıt alımı yok.</div>";
-
-    $("tripList").innerHTML = state.trips.length ? state.trips.map(function (t) {
-      var hasRoute = t.pts && t.pts.length > 1;
-      return "<li><div class='t'>" + esc(t.name || "Yolculuk") + "</div>" +
-        "<small class='num'>" + fmt(t.km, 2) + " km · " + hms(t.dur != null ? t.dur : t.end - t.start) + (t.paused > 60000 ? " (mola " + hms(t.paused) + ")" : "") + " · en yüksek " + Math.round(t.max) + " km/sa" +
-        (t.cost != null ? " · ≈" + fmt(t.cost, 0) + " TL, " + fmt(t.liters, 1) + " L" : "") + "<br>" + dtm(t.start) + "</small>" +
-        "<div class='acts'><button data-act='rename' data-id='" + t.id + "'>Düzenle</button>" +
-        (hasRoute ? "<button data-act='map' data-id='" + t.id + "'>Haritada aç</button><button data-act='gpx' data-id='" + t.id + "'>GPX</button>" : "") +
-        "<button data-act='json' data-id='" + t.id + "'>JSON</button>" +
-        "<button data-act='del-trip' data-id='" + t.id + "'>Sil</button></div></li>";
-    }).join("") : "<div class='empty'>Henüz yolculuk yok.</div>";
+    if (drawnVer !== listVer) { drawnVer = listVer; drawLists(rt); }
   }
 
   /* ---------- Başlangıç ---------- */
   applySettingsUI();
   render();
+  keepAwake();
+  document.addEventListener("click", keepAwake);
   if (state.trip) { setStatus("Yolculuk devam ediyor…"); startWatch(); }
 })();
 </script>
